@@ -1,41 +1,36 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-
+import matplotlib.pyplot as plt
 from recommendations import generate_recommendations
 
 st.set_page_config(
-    page_title="AI-Powered Personal Finance Budget Chatbot",
+    page_title="Finance Budget Chatbot",
     layout="wide"
 )
 
-st.title("AI-Powered Personal Finance Budget Chatbot")
+st.title("Smart Personal Finance Budget Chatbot")
 
-try:
+# ---------------- LOAD DATA ----------------
+
+@st.cache_data
+def load_data():
     transactions = pd.read_csv("personal_transactions.csv")
-    budget = pd.read_csv("budget.csv")
-except FileNotFoundError as e:
-    st.error(f"Missing file: {e.filename}")
-    st.stop()
+    budget = pd.read_csv("Budget.csv")
 
-transactions.columns = transactions.columns.str.strip()
-budget.columns = budget.columns.str.strip()
+    transactions.columns = transactions.columns.str.strip()
+    budget.columns = budget.columns.str.strip()
 
-required_columns = ["Date", "Description", "Amount", "Transaction Type", "Category", "Account Name"]
+    transactions["Date"] = pd.to_datetime(transactions["Date"], errors="coerce")
+    transactions = transactions.dropna(subset=["Date"])
 
-missing_columns = [col for col in required_columns if col not in transactions.columns]
+    transactions["Month"] = transactions["Date"].dt.strftime("%Y-%m")
 
-if missing_columns:
-    st.error(f"Missing columns in personal_transactions.csv: {missing_columns}")
-    st.write("Available columns:", transactions.columns.tolist())
-    st.stop()
+    return transactions, budget
 
-transactions["Date"] = pd.to_datetime(transactions["Date"], errors="coerce")
-transactions["Amount"] = pd.to_numeric(transactions["Amount"], errors="coerce")
 
-transactions = transactions.dropna(subset=["Date", "Amount"])
+transactions, budget = load_data()
 
-transactions["Month"] = transactions["Date"].dt.month_name()
+# ---------------- SIDEBAR ----------------
 
 st.sidebar.header("Filters")
 
@@ -46,78 +41,210 @@ selected_month = st.sidebar.selectbox(
     months
 )
 
-filtered_transactions = transactions[
-    transactions["Month"] == selected_month
+# ---------------- FILTER DATA ----------------
+
+month_data = transactions[transactions["Month"] == selected_month]
+
+expenses = month_data[
+    month_data["Transaction Type"].str.lower() == "debit"
 ]
 
-st.subheader(f"Transactions for {selected_month}")
-st.dataframe(filtered_transactions, use_container_width=True)
+income_data = month_data[
+    month_data["Transaction Type"].str.lower() == "credit"
+]
 
-total_spent = filtered_transactions[
-    filtered_transactions["Transaction Type"].str.lower() == "debit"
-]["Amount"].sum()
+# ---------------- SUMMARY ----------------
 
-total_income = filtered_transactions[
-    filtered_transactions["Transaction Type"].str.lower() == "credit"
-]["Amount"].sum()
+st.subheader("Monthly Summary")
 
+total_income = income_data["Amount"].sum()
+total_spent = expenses["Amount"].sum()
 balance = total_income - total_spent
 
 col1, col2, col3 = st.columns(3)
 
-col1.metric("Total Income", f"₹{total_income:,.2f}")
-col2.metric("Total Spending", f"₹{total_spent:,.2f}")
-col3.metric("Balance", f"₹{balance:,.2f}")
+col1.metric("Income", f"${total_income:.2f}")
+col2.metric("Expenses", f"${total_spent:.2f}")
+col3.metric("Balance", f"${balance:.2f}")
 
-st.subheader("Spending by Category")
+# ---------------- CATEGORY SPENDING ----------------
 
-debit_transactions = filtered_transactions[
-    filtered_transactions["Transaction Type"].str.lower() == "debit"
-]
+st.subheader("Category-wise Spending")
 
-if not debit_transactions.empty:
-    category_spending = (
-        debit_transactions
-        .groupby("Category")["Amount"]
-        .sum()
-        .reset_index()
-        .sort_values(by="Amount", ascending=False)
+category_spending = (
+    expenses.groupby("Category")["Amount"]
+    .sum()
+    .reset_index()
+    .sort_values("Amount", ascending=False)
+)
+
+st.dataframe(category_spending, use_container_width=True)
+
+if not category_spending.empty:
+    top = category_spending.iloc[0]
+
+    st.success(
+        f"Highest Spending Category: {top['Category']} (${top['Amount']:.2f})"
     )
 
-    fig = px.bar(
+    if total_income > 0:
+        savings_rate = (balance / total_income) * 100
+        st.info(f"Savings Rate: {savings_rate:.2f}%")
+
+    st.info(f"Transactions this month: {len(month_data)}")
+
+# ---------------- CHART ----------------
+
+st.subheader("Top 10 Spending Categories")
+
+if not category_spending.empty:
+    chart_data = category_spending.sort_values("Amount", ascending=True).tail(10)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.barh(chart_data["Category"], chart_data["Amount"])
+    ax.set_xlabel("Amount Spent")
+    ax.set_ylabel("Category")
+    ax.set_title("Top Spending Categories")
+
+    st.pyplot(fig)
+else:
+    st.warning("No expense data available for this month.")
+
+# ---------------- RECOMMENDATIONS ----------------
+
+st.subheader("Smart Financial Recommendations")
+
+recommendations = generate_recommendations(
+    total_income,
+    total_spent,
+    balance,
+    category_spending
+)
+
+for rec in recommendations:
+    st.warning(rec)
+
+# ---------------- DOWNLOAD REPORT ----------------
+
+st.subheader("Download Financial Report")
+
+if not category_spending.empty:
+    highest_category_text = f"{top['Category']} - ${top['Amount']:.2f}"
+else:
+    highest_category_text = "No spending data available"
+
+report = f"""
+Smart Personal Finance Budget Report
+
+Month: {selected_month}
+
+Income: ${total_income:.2f}
+Expenses: ${total_spent:.2f}
+Balance: ${balance:.2f}
+
+Highest Spending Category:
+{highest_category_text}
+
+Recommendations:
+"""
+
+for rec in recommendations:
+    report += f"- {rec}\n"
+
+st.download_button(
+    label="Download Report",
+    data=report,
+    file_name=f"finance_report_{selected_month}.txt",
+    mime="text/plain"
+)
+
+# ---------------- BUDGET VS ACTUAL ----------------
+
+st.subheader("Budget vs Actual")
+
+budget.columns = budget.columns.str.strip()
+category_spending.columns = category_spending.columns.str.strip()
+
+if "Category" in budget.columns:
+    merged = pd.merge(
+        budget,
         category_spending,
-        x="Category",
-        y="Amount",
-        title="Category-wise Spending"
+        on="Category",
+        how="left"
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    merged["Amount"] = merged["Amount"].fillna(0)
+
+    budget_col = [
+        col for col in merged.columns
+        if col.lower() != "category" and col.lower() != "amount"
+    ][0]
+
+    merged["Status"] = merged.apply(
+        lambda row: "Over Budget"
+        if row["Amount"] > row[budget_col]
+        else "Within Budget",
+        axis=1
+    )
+
+    st.dataframe(merged, use_container_width=True)
 else:
-    st.info("No debit transactions found for this month.")
+    st.error("Budget.csv must contain a Category column.")
+    merged = pd.DataFrame()
 
-st.subheader("Budget Overview")
-st.dataframe(budget, use_container_width=True)
+# ---------------- CHATBOT ----------------
 
-st.subheader("Top Expenses")
+st.subheader("Finance Chatbot")
 
-top_expenses = debit_transactions.sort_values(by="Amount", ascending=False).head(10)
+question = st.text_input("Ask a finance question")
 
-if not top_expenses.empty:
-    st.dataframe(top_expenses, use_container_width=True)
-else:
-    st.info("No expenses available.")
+if question:
+    q = question.lower()
 
-st.subheader("AI Recommendations")
+    if "income" in q:
+        st.write(f"Your income in {selected_month} is ${total_income:.2f}.")
 
-try:
-    recommendations = generate_recommendations(filtered_transactions, budget)
+    elif "expense" in q or "spent" in q or "total" in q:
+        st.write(f"You spent ${total_spent:.2f} in {selected_month}.")
 
-    if isinstance(recommendations, list):
-        for item in recommendations:
-            st.write(f"- {item}")
+    elif "balance" in q or "saving" in q:
+        st.write(f"Your balance/savings in {selected_month} is ${balance:.2f}.")
+
+    elif "highest" in q or "most" in q:
+        if not category_spending.empty:
+            top = category_spending.iloc[0]
+            st.write(
+                f"You spent the most on {top['Category']} = ${top['Amount']:.2f}."
+            )
+        else:
+            st.write("No expense data available for this month.")
+
+    elif "save" in q or "money" in q:
+        if not category_spending.empty:
+            top = category_spending.iloc[0]
+            reduce_amount = top["Amount"] * 0.10
+
+            st.write(
+                f"To save more money, reduce spending on {top['Category']}. "
+                f"If you cut it by 10%, you can save around ${reduce_amount:.2f}."
+            )
+        else:
+            st.write("No spending data available to generate savings advice.")
+
+    elif "budget" in q:
+        if not merged.empty:
+            over_budget = merged[merged["Status"] == "Over Budget"]
+
+            if not over_budget.empty:
+                st.write("These categories are over budget:")
+                st.dataframe(over_budget, use_container_width=True)
+            else:
+                st.write("Good. No category crossed the budget.")
+        else:
+            st.write("Budget data is not available.")
+
     else:
-        st.write(recommendations)
-
-except Exception as e:
-    st.warning("Recommendations could not be generated.")
-    st.write(e)
+        st.write(
+            "Ask questions like: income, expenses, balance, highest spending, "
+            "how to save money, or budget status."
+        )
