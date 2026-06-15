@@ -10,12 +10,10 @@ st.set_page_config(
 
 st.title("Smart Personal Finance Budget Chatbot")
 
-# ---------------- LOAD DATA ----------------
-
 @st.cache_data
 def load_data():
     transactions = pd.read_csv("personal_transactions.csv")
-    budget = pd.read_csv("Budget.csv")
+    budget = pd.read_csv("budget.csv")
 
     transactions.columns = transactions.columns.str.strip()
     budget.columns = budget.columns.str.strip()
@@ -30,8 +28,6 @@ def load_data():
 
 transactions, budget = load_data()
 
-# ---------------- SIDEBAR ----------------
-
 st.sidebar.header("Filters")
 
 months = sorted(transactions["Month"].unique())
@@ -40,8 +36,6 @@ selected_month = st.sidebar.selectbox(
     "Select Month",
     months
 )
-
-# ---------------- FILTER DATA ----------------
 
 month_data = transactions[transactions["Month"] == selected_month]
 
@@ -53,21 +47,16 @@ income_data = month_data[
     month_data["Transaction Type"].str.lower() == "credit"
 ]
 
-# ---------------- SUMMARY ----------------
-
-st.subheader("Monthly Summary")
+st.subheader(" Monthly Summary")
 
 total_income = income_data["Amount"].sum()
 total_spent = expenses["Amount"].sum()
 balance = total_income - total_spent
 
 col1, col2, col3 = st.columns(3)
-
 col1.metric("Income", f"${total_income:.2f}")
 col2.metric("Expenses", f"${total_spent:.2f}")
 col3.metric("Balance", f"${balance:.2f}")
-
-# ---------------- CATEGORY SPENDING ----------------
 
 st.subheader("Category-wise Spending")
 
@@ -84,18 +73,16 @@ if not category_spending.empty:
     top = category_spending.iloc[0]
 
     st.success(
-        f"Highest Spending Category: {top['Category']} (${top['Amount']:.2f})"
+        f" Highest Spending Category: {top['Category']} (${top['Amount']:.2f})"
     )
 
     if total_income > 0:
         savings_rate = (balance / total_income) * 100
-        st.info(f"Savings Rate: {savings_rate:.2f}%")
+        st.info(f" Savings Rate: {savings_rate:.2f}%")
 
-    st.info(f"Transactions this month: {len(month_data)}")
+    st.info(f" Transactions this month: {len(month_data)}")
 
-# ---------------- CHART ----------------
-
-st.subheader("Top 10 Spending Categories")
+st.subheader(" Top 10 Spending Categories")
 
 if not category_spending.empty:
     chart_data = category_spending.sort_values("Amount", ascending=True).tail(10)
@@ -110,9 +97,7 @@ if not category_spending.empty:
 else:
     st.warning("No expense data available for this month.")
 
-# ---------------- RECOMMENDATIONS ----------------
-
-st.subheader("Smart Financial Recommendations")
+st.subheader("💡 Smart Financial Recommendations")
 
 recommendations = generate_recommendations(
     total_income,
@@ -124,11 +109,10 @@ recommendations = generate_recommendations(
 for rec in recommendations:
     st.warning(rec)
 
-# ---------------- DOWNLOAD REPORT ----------------
-
-st.subheader("Download Financial Report")
+st.subheader(" Download Financial Report")
 
 if not category_spending.empty:
+    top = category_spending.iloc[0]
     highest_category_text = f"{top['Category']} - ${top['Amount']:.2f}"
 else:
     highest_category_text = "No spending data available"
@@ -157,8 +141,6 @@ st.download_button(
     file_name=f"finance_report_{selected_month}.txt",
     mime="text/plain"
 )
-
-# ---------------- BUDGET VS ACTUAL ----------------
 
 st.subheader("Budget vs Actual")
 
@@ -189,12 +171,10 @@ if "Category" in budget.columns:
 
     st.dataframe(merged, use_container_width=True)
 else:
-    st.error("Budget.csv must contain a Category column.")
+    st.error("budget.csv must contain a Category column.")
     merged = pd.DataFrame()
 
-# ---------------- CHATBOT ----------------
-
-st.subheader("Finance Chatbot")
+st.subheader("🤖 Finance Chatbot")
 
 question = st.text_input("Ask a finance question")
 
