@@ -11,7 +11,6 @@ st.set_page_config(
 
 st.title("AI-Powered Personal Finance Budget Chatbot")
 
-# Load CSV files safely
 try:
     transactions = pd.read_csv("personal_transactions.csv")
     budget = pd.read_csv("budget.csv")
@@ -19,25 +18,32 @@ except FileNotFoundError as e:
     st.error(f"Missing file: {e.filename}")
     st.stop()
 
-# Clean column names
 transactions.columns = transactions.columns.str.strip()
 budget.columns = budget.columns.str.strip()
 
+required_columns = ["Date", "Description", "Amount", "Transaction Type", "Category", "Account Name"]
+
+missing_columns = [col for col in required_columns if col not in transactions.columns]
+
+if missing_columns:
+    st.error(f"Missing columns in personal_transactions.csv: {missing_columns}")
+    st.write("Available columns:", transactions.columns.tolist())
+    st.stop()
+
+transactions["Date"] = pd.to_datetime(transactions["Date"], errors="coerce")
+transactions["Amount"] = pd.to_numeric(transactions["Amount"], errors="coerce")
+
+transactions = transactions.dropna(subset=["Date", "Amount"])
+
+transactions["Month"] = transactions["Date"].dt.month_name()
+
 st.sidebar.header("Filters")
 
-# Convert date column
-transactions["Transaction Date"] = pd.to_datetime(
-    transactions["Transaction Date"],
-    errors="coerce"
-)
-
-transactions = transactions.dropna(subset=["Transaction Date"])
-
-transactions["Month"] = transactions["Transaction Date"].dt.month_name()
+months = sorted(transactions["Month"].unique())
 
 selected_month = st.sidebar.selectbox(
     "Select Month",
-    sorted(transactions["Month"].unique())
+    months
 )
 
 filtered_transactions = transactions[
@@ -45,35 +51,62 @@ filtered_transactions = transactions[
 ]
 
 st.subheader(f"Transactions for {selected_month}")
-st.dataframe(filtered_transactions)
+st.dataframe(filtered_transactions, use_container_width=True)
 
-# Summary
-total_spent = filtered_transactions["Amount"].sum()
-st.metric("Total Spending", f"₹{total_spent:,.2f}")
+total_spent = filtered_transactions[
+    filtered_transactions["Transaction Type"].str.lower() == "debit"
+]["Amount"].sum()
 
-# Category spending chart
-if "Category" in filtered_transactions.columns:
+total_income = filtered_transactions[
+    filtered_transactions["Transaction Type"].str.lower() == "credit"
+]["Amount"].sum()
+
+balance = total_income - total_spent
+
+col1, col2, col3 = st.columns(3)
+
+col1.metric("Total Income", f"₹{total_income:,.2f}")
+col2.metric("Total Spending", f"₹{total_spent:,.2f}")
+col3.metric("Balance", f"₹{balance:,.2f}")
+
+st.subheader("Spending by Category")
+
+debit_transactions = filtered_transactions[
+    filtered_transactions["Transaction Type"].str.lower() == "debit"
+]
+
+if not debit_transactions.empty:
     category_spending = (
-        filtered_transactions
+        debit_transactions
         .groupby("Category")["Amount"]
         .sum()
         .reset_index()
+        .sort_values(by="Amount", ascending=False)
     )
 
     fig = px.bar(
         category_spending,
         x="Category",
         y="Amount",
-        title="Spending by Category"
+        title="Category-wise Spending"
     )
 
     st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("No debit transactions found for this month.")
 
-# Budget comparison
 st.subheader("Budget Overview")
-st.dataframe(budget)
+st.dataframe(budget, use_container_width=True)
 
-# Recommendations
+st.subheader("Top Expenses")
+
+top_expenses = debit_transactions.sort_values(by="Amount", ascending=False).head(10)
+
+if not top_expenses.empty:
+    st.dataframe(top_expenses, use_container_width=True)
+else:
+    st.info("No expenses available.")
+
 st.subheader("AI Recommendations")
 
 try:
